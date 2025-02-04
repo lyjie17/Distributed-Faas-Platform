@@ -57,7 +57,7 @@ def execute_function(fn: ExecuteFnReq) -> ExecuteFnRep:
         task_id = uuid.uuid4()
         task_data = {
             "function_id": str(fn.function_id),
-            "params": function_body.payload,
+            "params": function_body["payload"],
             "status": "QUEUED",
             "result": None
         }
@@ -68,7 +68,7 @@ def execute_function(fn: ExecuteFnReq) -> ExecuteFnRep:
         raise HTTPException(status_code=500, detail=f"Error executing function: {e}")
     
 @app.get("/status/{task_id}", response_model=TaskStatusRep)
-def get_task_status(task_id: uuid.UUID):
+def get_task_status(task_id: uuid.UUID) -> TaskStatusRep:
     try:
         task_data = redis_client.get(str(task_id))
         if not task_data:
@@ -80,7 +80,7 @@ def get_task_status(task_id: uuid.UUID):
         raise HTTPException(status_code=500, detail=f"Error retrieving task status: {e}")
     
 @app.get("/result/{task_id}", response_model=TaskResultRep)
-def get_task_result(task_id: uuid.UUID):
+def get_task_result(task_id: uuid.UUID) -> TaskResultRep:
     try:
         task_data = redis_client.get(str(task_id))
         if not task_data:
