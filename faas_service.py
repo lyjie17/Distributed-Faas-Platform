@@ -8,7 +8,7 @@ from utils import serialize, deserialize
 app = FastAPI()
 
 # Redis setup
-redis_client = redis.Redis(host="localhost", port=6379)
+redis_client = redis.Redis(host="localhost", port=6379, decode_responses=True)
 
 class RegisterFn(BaseModel):
     name: str
@@ -43,8 +43,9 @@ def register_function(fn: RegisterFn) -> RegisterFnRep:
             "name": fn.name,
             "payload": fn.payload
         }
-        # store function in Redis
-        redis_client.set(str(function_id), serialize(function_body))
+        # create key for function and store it in Redis
+        redis_key = f"function:{function_id}"
+        redis_client.set(redis_key, serialize(function_body))
         return {"function_id": function_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error registering function: {e}")
@@ -54,13 +55,15 @@ def register_function(fn: RegisterFn) -> RegisterFnRep:
 def execute_function(req: ExecuteFnReq) -> ExecuteFnRep:
     try:
         # retrieve function from Redis and check if it exists
-        function_body = redis_client.get(str(req.function_id))
+        redis_key = f"function:{req.function_id}" # construct key
+        function_body = redis_client.get(redis_key)
         if not function_body:
             raise HTTPException(status_code=404, detail="Function is not found")
         # deserialize function
         function_body = deserialize(function_body)
         # create a task and store it in Redis
         task_id = uuid.uuid4()
+        task_key = f"task:{task_id}"
         task_data = {
             "function_id": str(req.function_id),
             "fn_payload": function_body["payload"],
@@ -68,7 +71,7 @@ def execute_function(req: ExecuteFnReq) -> ExecuteFnRep:
             "status": "QUEUED",
             "result": None
         }
-        redis_client.set(str(task_id), serialize(task_data))
+        redis_client.set(task_key, serialize(task_data))
         # publish task to the Tasks channel
         redis_client.publish("Tasks", str(task_id))
         return {"task_id": task_id}
@@ -80,7 +83,9 @@ def execute_function(req: ExecuteFnReq) -> ExecuteFnRep:
 def get_task_status(task_id: uuid.UUID) -> TaskStatusRep:
     try:
         # retrieve task from Redis and check if it exists
-        task_data = redis_client.get(str(task_id))
+        task_id = str(task_id)
+        task_key = f"task:{task_id}"
+        task_data = redis_client.get(task_key)
         if not task_data:
             raise HTTPException(status_code=404, detail="Task is not found")
         # deserialize task and return status
@@ -94,7 +99,9 @@ def get_task_status(task_id: uuid.UUID) -> TaskStatusRep:
 def get_task_result(task_id: uuid.UUID) -> TaskResultRep:
     try:
         # retrieve task from Redis and check if it exists
-        task_data = redis_client.get(str(task_id))
+        task_id = str(task_id)
+        task_key = f"task:{task_id}"
+        task_data = redis_client.get(task_key)
         if not task_data:
             raise HTTPException(status_code=404, detail="Task is not found")
         # deserialize task and return status and result

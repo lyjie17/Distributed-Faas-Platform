@@ -1,3 +1,12 @@
+"""
+Launch the task dispatcher in one of three modes:
+  - local: Uses a multiprocessing pool to execute tasks locally.
+  - pull: Uses a ZeroMQ REP socket to serve tasks on request.
+  - push: Uses a ZeroMQ ROUTER socket to push tasks to waiting workers.
+
+Usage:
+    python3 task_dispatcher.py -m [local|pull|push] -p <port> -w <num_worker_processors>
+"""
 import zmq
 import redis
 import uuid
@@ -6,7 +15,7 @@ import time
 import argparse
 from utils import serialize, deserialize
 
-redis_client = redis.Redis(host="localhost", port=6379)
+redis_client = redis.Redis(host="localhost", port=6379, decode_responses=True)
 context = zmq.Context()
 
 
