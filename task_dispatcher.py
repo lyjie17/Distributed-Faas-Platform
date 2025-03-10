@@ -126,14 +126,15 @@ def handle_pull_mode(port):
                 task_id = message["task_id"]
                 status = message["status"]
                 result = message["result"]
-                task_key = f"task:{task_id}"
-                task_data = redis_client.get(task_key)
-                if task_data:
-                    task_data = deserialize(task_data)
-                    task_data["status"] = status
-                    task_data["result"] = result
-                    redis_client.set(task_key, serialize(task_data))
-                    print(f"Pull Mode: Task {task_id} finished with {status} status.")
+                update_task(task_id, status, result)
+                # task_key = f"task:{task_id}"
+                # task_data = redis_client.get(task_key)
+                # if task_data:
+                #     task_data = deserialize(task_data)
+                #     task_data["status"] = status
+                #     task_data["result"] = result
+                #     redis_client.set(task_key, serialize(task_data))
+                #     print(f"Pull Mode: Task {task_id} finished with {status} status.")
                 pull_socket.send(json.dumps({"type": "ACK"}).encode())
             else:
                 pull_socket.send(b"")
@@ -159,17 +160,70 @@ def handle_push_mode(port):
             task_key = f"task:{task_id}"
             task_data = redis_client.get(task_key)
             if task_data:
-                task_data = json.loads(task_data)
+                task_data = deserialize(task_data)
                 task_queue.put(task_data)
 
     listener_thread = Thread(target=redis_listener, daemon=True)
     listener_thread.start()
+
     # setup the push socket
     context = zmq.Context()
     push_socket = context.socket(zmq.ROUTER)
     push_socket.bind(f"tcp://*:{port}")
     print(f"Push Mode: listening on port {port}...")
+    
+    available_workers = []
+    poller = zmq.Poller()
+    poller.register(push_socket, zmq.POLLIN)
 
+    while True:
+        # poll for messages from workers.
+        socks = dict(poller.poll(timeout=1000))
+        if push_socket in socks and socks[push_socket] == zmq.POLLIN:
+            msg_parts = push_socket.recv_multipart()
+            if len(msg_parts) < 3: # msg_parts[1] is the empty delimiter.
+                continue
+            worker_id = msg_parts[0]
+            message = json.loads(msg_parts[2].decode())
+
+            if message["type"] == "READY":
+                available_workers.append(worker_id)
+                print(f"Push Mode: Worker {worker_id} is ready.")
+            # ------- send back result -------
+            elif message["type"] == "RESULT":
+                task_id = message["task_id"]
+                status = message["status"]
+                result = message["result"]
+                print(f"Push Mode: Receive result for task {task_id} from worker {worker_id}.")
+                task_key = f"task:{task_id}"
+                task_data = redis_client.get(task_key)
+                if task_data:
+                    task_data = deserialize(task_data)
+                    task_data["status"] = status
+                    task_data["result"] = result
+                    redis_client.set(task_key, serialize(task_data))
+                    print(f"Push Mode: task {task_id} finished with {status} status.")
+                #push_socket.send_multipart([worker_id, b"ACK"])
+                available_workers.append(worker_id)
+            else:
+                print(f"Push Mode: unknown message type from worker {worker_id}: {message["type"]}")
+                push_socket.send_multipart([worker_id, b""])
+
+        # when both a task is waiting and a worker is available, dispatch the task.
+        if not task_queue.empty() and available_workers:
+            task_data = task_queue.get()
+            task_id = task_data["task_id"]
+            # update the task status to RUNNING
+            update_task(task_id, "RUNNING", "")
+            worker_id = available_workers.pop(0)
+            message = {
+                "type": "TASK",
+                "task_id": task_id,
+                "fn_payload": task_data["fn_payload"],
+                "param_payload": task_data["param_payload"]
+            }
+            push_socket.send_multipart([worker_id, b"", json.dumps(message).encode()])
+            print(f"Push Mode: sending task {task_data['task_id']} to worker {worker_id}.")
     
 
 if __name__ == '__main__':
