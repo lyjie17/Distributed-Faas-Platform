@@ -13,26 +13,12 @@ import uuid
 import json
 import time
 import argparse
-from utils import serialize, deserialize
+from utils import serialize, deserialize, execute_task
 from multiprocessing import Pool
 from queue import Queue
 from threading import Thread
 
 redis_client = redis.Redis(host="localhost", port=6379, decode_responses=True)
-
-#  perform deserialization and execute the function, return (task_id, status, result_payload)
-def execute_task(task_id: str, fn_payload: str, param_payload: str):
-    try:
-        # Deserialize function and param payload
-        fn = deserialize(fn_payload)
-        params = deserialize(param_payload)
-        args, kwargs = params
-        # Execute the function
-        result = fn(*args, **kwargs)
-        return task_id, "COMPLETE", serialize(result)
-    except Exception as e:
-        err_result = f"Error executing task: {e}"
-        return task_id, "FAILED", serialize(err_result)
     
 
 def update_task(task_id, status, result):
@@ -228,6 +214,17 @@ def handle_push_mode(port):
 
 if __name__ == '__main__':
     try:
-        print("Task Dispatcher Service")
+        parser = argparse.ArgumentParser()
+        parser.add_argument("-m", "--mode", help="mode: local, pull, push", required=True)
+        parser.add_argument("-p", "--port", help="port number (only for push/pull)")
+        parser.add_argument("-w", "--num_workers", help="number of worker processors (only for local)")
+        args = parser.parse_args()
+
+        if args.mode == "local":
+            run_local_mode(args.workers)
+        elif args.mode == "pull":
+            handle_pull_mode(args.port)
+        elif args.mode == "push":
+            handle_push_mode(args.port)
     except Exception as e:
         print(f"Error in main execution: {e}")
